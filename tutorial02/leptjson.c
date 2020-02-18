@@ -7,6 +7,9 @@
 
 #define EXPECT(c, ch)       do { assert(*c->json == (ch)); c->json++; } while(0)
 
+#define ISDIGIT(ch)         ((ch) >= '0' && (ch) <= '9')
+#define ISDIGIT1TO9(ch)     ((ch) >= '1' && (ch) <= '9')
+
 typedef struct {
     const char* json;
 }lept_context;
@@ -218,18 +221,61 @@ static int valid_number(lept_context *c)
     }
 }
 
+
+static int valid_number2(lept_context *c, char **end)
+{
+    const char *p = c->json;
+    if (*p == '-')
+        ++p;
+    if (*p == '0')
+    {
+        ++p;
+    }
+    else if (ISDIGIT1TO9(*p))
+    {
+        for (p++; ISDIGIT(*p); p++);
+    }
+    else
+    {
+        return LEPT_PARSE_INVALID_VALUE;
+    }
+
+    if (*p == '.')
+    {
+        p++;
+        if (!ISDIGIT(*p))
+            return LEPT_PARSE_INVALID_VALUE;
+        for (p++; ISDIGIT(*p); p++);
+    }
+
+    if (*p == 'e' || *p == 'E')
+    {
+        p++;
+        if (*p == '+' || *p == '-')
+        {
+            p++;
+        }
+        if (!ISDIGIT(*p))
+            return LEPT_PARSE_INVALID_VALUE;
+        for (p++; ISDIGIT(*p); p++){};
+    }
+
+    *end = p;
+    return LEPT_PARSE_OK;
+}
+
 static int lept_parse_number(lept_context* c, lept_value* v) {
-    char* end;
+    char *end;
     int ret;
     lept_context tc;
     tc.json = c->json;
-    ret = valid_number(&tc);
+    ret = valid_number2(&tc, &end);
     if (ret != LEPT_PARSE_OK)
     {
         return ret;
     }
     errno = 0;
-    v->n = strtod(c->json, &end);
+    v->n = strtod(c->json, NULL);
     if (errno == ERANGE && (v->n == HUGE_VAL || v->n == -HUGE_VAL))
     {
         return LEPT_PARSE_NUMBER_TOO_BIG;
