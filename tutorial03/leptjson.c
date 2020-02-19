@@ -1,4 +1,5 @@
 #include "leptjson.h"
+#include "stdio.h"
 #include <assert.h>  /* assert() */
 #include <errno.h>   /* errno, ERANGE */
 #include <math.h>    /* HUGE_VAL */
@@ -19,6 +20,8 @@ typedef struct {
     char* stack;
     size_t size, top;
 }lept_context;
+
+static char escape_char_arr[] = "\"\\/bfnrt";
 
 static void* lept_context_push(lept_context* c, size_t size) {
     void* ret;
@@ -86,14 +89,57 @@ static int lept_parse_number(lept_context* c, lept_value* v) {
     return LEPT_PARSE_OK;
 }
 
+static int lept_parse_escape_char(lept_context *c, char ch)
+{
+    switch (ch)
+    {
+        case '"':
+            PUTC(c, '"');
+            return LEPT_PARSE_OK;
+        case '\\':
+            PUTC(c, '\\');
+            return LEPT_PARSE_OK;
+        case '/':
+            PUTC(c, '/');
+            return LEPT_PARSE_OK;
+        case 'b':
+            PUTC(c, '\b');
+            return LEPT_PARSE_OK;
+        case 'f':
+            PUTC(c, '\f');
+            return LEPT_PARSE_OK;
+        case 'n':
+            PUTC(c, '\n');
+            return LEPT_PARSE_OK;
+        case 'r':
+            PUTC(c, '\r');
+            return LEPT_PARSE_OK;
+        case 't':
+            PUTC(c, '\t');
+            return LEPT_PARSE_OK;
+        default:
+            return LEPT_PARSE_INVALID_STRING_ESCAPE;
+    }
+}
+
 static int lept_parse_string(lept_context* c, lept_value* v) {
     size_t head = c->top, len;
+    int ret;
     const char* p;
     EXPECT(c, '\"');
     p = c->json;
     for (;;) {
         char ch = *p++;
         switch (ch) {
+            case '\\':
+                ret = lept_parse_escape_char(c, *p++);
+                if (ret != LEPT_PARSE_OK)
+                {
+                    // 这里存在一个问题：在失败的时候我需要回退栈
+                    //c->top = head;
+                    return LEPT_PARSE_INVALID_STRING_ESCAPE;
+                }
+                break;
             case '\"':
                 len = c->top - head;
                 lept_set_string(v, (const char*)lept_context_pop(c, len), len);
@@ -103,6 +149,11 @@ static int lept_parse_string(lept_context* c, lept_value* v) {
                 c->top = head;
                 return LEPT_PARSE_MISS_QUOTATION_MARK;
             default:
+                // 这里也有一个问题： char 带不带符号是由实现决定的
+                // 有可能出现的问题是：在带符号的实现中，ch >= 0x80 的会变成负数
+                //if (((unsigned char) ch) < 0x20)
+                if (ch < 0x20)
+                    return LEPT_PARSE_INVALID_STRING_CHAR;
                 PUTC(c, ch);
         }
     }
@@ -153,12 +204,13 @@ lept_type lept_get_type(const lept_value* v) {
 }
 
 int lept_get_boolean(const lept_value* v) {
-    /* \TODO */
-    return 0;
+    assert(v != NULL && (v->type == LEPT_TRUE || v->type == LEPT_FALSE));
+    return v->type != LEPT_FALSE;
 }
 
 void lept_set_boolean(lept_value* v, int b) {
-    /* \TODO */
+    lept_free(v);
+    v->type = ((b == 0) ? LEPT_FALSE : LEPT_TRUE);
 }
 
 double lept_get_number(const lept_value* v) {
@@ -167,7 +219,10 @@ double lept_get_number(const lept_value* v) {
 }
 
 void lept_set_number(lept_value* v, double n) {
-    /* \TODO */
+    assert(v != NULL);
+    lept_free(v);
+    v->type = LEPT_NUMBER;
+    v->u.n = n;
 }
 
 const char* lept_get_string(const lept_value* v) {
