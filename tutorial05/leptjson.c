@@ -184,9 +184,13 @@ static int lept_parse_string(lept_context* c, lept_value* v) {
 static int lept_parse_value(lept_context* c, lept_value* v);
 
 static int lept_parse_array(lept_context* c, lept_value* v) {
-    size_t size = 0;
+    size_t size = 0, i;
     int ret;
     EXPECT(c, '[');
+    lept_parse_whitespace(c);
+    /* 碰到 ] 时退出解析 array，并将 array 的最后一个元素设置为 NULL */
+    /* 为什么要在这里增加一个判断，是因为 empty array 是一个特殊的结构 */
+    /* 它是一个数组，但是它的指针 v->u.a.e 不指向一个元素（这个元素也是数组的实际数据的首地址），而是指向 NULL */
     if (*c->json == ']') {
         c->json++;
         v->type = LEPT_ARRAY;
@@ -194,13 +198,21 @@ static int lept_parse_array(lept_context* c, lept_value* v) {
         v->u.a.e = NULL;
         return LEPT_PARSE_OK;
     }
-    for (;;) {
+    for (;;)
+    {
         lept_value e;
+        lept_parse_whitespace(c);
         lept_init(&e);
+        /* 解析当前节点数据，可能是任意一个类型：array，string */
+        /* 我们在结构体中存储的只是一个指针和基本类型，实际的数据（string， array）都存放在 stack 上 */
         if ((ret = lept_parse_value(c, &e)) != LEPT_PARSE_OK)
-            return ret;
+        {
+            break;
+        }
+        /* 将解析的第一个元素压栈 */
         memcpy(lept_context_push(c, sizeof(lept_value)), &e, sizeof(lept_value));
         size++;
+        lept_parse_whitespace(c);
         if (*c->json == ',')
             c->json++;
         else if (*c->json == ']') {
@@ -208,12 +220,35 @@ static int lept_parse_array(lept_context* c, lept_value* v) {
             v->type = LEPT_ARRAY;
             v->u.a.size = size;
             size *= sizeof(lept_value);
+            /* 注意，这里我们有一个非常重要的点：我们存储的数据结构是一个数组。
+             * 所以我们的 lept_value 中并不需要一个指针 lept_value *next 来指向下一个元素
+             * 内存模型应该为：
+             *
+             * lept_value1|lept_value2|...
+             *
+             * 对于 ["hello", [1,2], true] 这个 JSON 的内存应该为：
+             *
+             *     ['h', 'e', 'l', 'l', 'o', '\0']
+             *     |
+             *     |
+             * lept_value_ptr:size_t:string|lept_value_ptr:size_t:array|nothing:true
+             *                                  |
+             *                                  |
+             *                                  [1, 2]
+             */
             memcpy(v->u.a.e = (lept_value*)malloc(size), lept_context_pop(c, size), size);
             return LEPT_PARSE_OK;
         }
-        else
-            return LEPT_PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
+        else {
+            ret = LEPT_PARSE_MISS_COMMA_OR_SQUARE_BRACKET;
+            break;
+        }
     }
+
+    /* 必须注意，我们在解析异常的时候，必须释放所有的内存 */
+    for (i = 0; i < size; i++)
+        lept_free((lept_value*)lept_context_pop(c, sizeof(lept_value)));
+    return ret;
 }
 
 static int lept_parse_value(lept_context* c, lept_value* v) {
@@ -250,9 +285,18 @@ int lept_parse(lept_value* v, const char* json) {
 }
 
 void lept_free(lept_value* v) {
+    size_t len;
     assert(v != NULL);
     if (v->type == LEPT_STRING)
         free(v->u.s.s);
+    else if (v->type == LEPT_ARRAY)
+    {
+        for (len = 0; len < v->u.a.size; ++len)
+        {
+            lept_free(v->u.a.e);
+        }
+        free(v->u.a.e);
+    }
     v->type = LEPT_NULL;
 }
 

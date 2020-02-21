@@ -129,11 +129,44 @@ static void test_parse_string() {
 
 static void test_parse_array() {
     lept_value v;
+    lept_value *p;
+    const char *s = "[ null, false, true, 123, \"abc\"]";
 
     lept_init(&v);
     EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&v, "[ ]"));
     EXPECT_EQ_INT(LEPT_ARRAY, lept_get_type(&v));
     EXPECT_EQ_SIZE_T(0, lept_get_array_size(&v));
+    lept_free(&v);
+
+    EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&v, s));
+    EXPECT_EQ_INT(LEPT_ARRAY, lept_get_type(&v));
+    EXPECT_EQ_SIZE_T(5, lept_get_array_size(&v));
+
+    EXPECT_EQ_INT(LEPT_NULL, ((v.u.a.e))->type);
+    EXPECT_EQ_INT(LEPT_FALSE, (*(v.u.a.e + 1)).type);
+    EXPECT_EQ_INT(LEPT_TRUE, (*(v.u.a.e + 2)).type);
+    EXPECT_EQ_INT(LEPT_NUMBER, (*(v.u.a.e + 3)).type);
+    EXPECT_EQ_DOUBLE(123.0, (*(v.u.a.e + 3)).u.n);
+    EXPECT_EQ_INT(LEPT_STRING, (*(v.u.a.e + 4)).type);
+    EXPECT_EQ_STRING("abc", (*(v.u.a.e + 4)).u.s.s, 3);
+    lept_free(&v);
+
+    EXPECT_EQ_INT(LEPT_PARSE_OK, lept_parse(&v, "[ [ ] , [ 0 ] , [ 0 , 1 ] , [ 0 , 1 , 2 ] ]"));
+    p = v.u.a.e;
+    EXPECT_EQ_INT(LEPT_ARRAY, p->type);
+    EXPECT_EQ_INT(LEPT_ARRAY, (p+1)->type);
+    EXPECT_EQ_INT(LEPT_ARRAY, (p+2)->type);
+    EXPECT_EQ_INT(LEPT_ARRAY, (p+3)->type);
+    EXPECT_TRUE(NULL == p->u.a.e);
+    EXPECT_EQ_DOUBLE(0.0, (p+1)->u.a.e->u.n);
+    EXPECT_TRUE(1 == (p+1)->u.a.size);
+    EXPECT_EQ_DOUBLE(0.0, (p+2)->u.a.e->u.n);
+    EXPECT_EQ_DOUBLE(1.0, ((p+2)->u.a.e + 1)->u.n);
+    EXPECT_TRUE(2 == (p+2)->u.a.size);
+    EXPECT_EQ_DOUBLE(0.0, (p+3)->u.a.e->u.n);
+    EXPECT_EQ_DOUBLE(1.0, ((p+3)->u.a.e + 1)->u.n);
+    EXPECT_EQ_DOUBLE(2.0, ((p+3)->u.a.e + 2)->u.n);
+    EXPECT_TRUE(3 == (p+3)->u.a.size);
     lept_free(&v);
 }
 
@@ -167,7 +200,7 @@ static void test_parse_invalid_value() {
     TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "nan");
 
     /* invalid value in array */
-#if 0
+#if 1
     TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "[1,]");
     TEST_ERROR(LEPT_PARSE_INVALID_VALUE, "[\"a\", nul]");
 #endif
