@@ -471,6 +471,17 @@ static void test_equal() {
     TEST_EQUAL("{\"a\":{\"b\":{\"c\":{}}}}", "{\"a\":{\"b\":{\"c\":[]}}}", 0);
 }
 
+static void test_copy_array() {
+	lept_value v1, v2;
+	lept_init(&v1);
+	lept_parse(&v1, "{\"a\":[4,5,6]}");
+	lept_init(&v2);
+	lept_copy(&v2, &v1);
+	EXPECT_TRUE(lept_is_equal(&v2, &v1));
+	lept_free(&v1);
+	lept_free(&v2);
+}
+
 static void test_copy() {
     lept_value v1, v2;
     lept_init(&v1);
@@ -591,7 +602,7 @@ static void test_access_array() {
     for (i = 0; i < 6; i++)
         EXPECT_EQ_DOUBLE((double)i + 2, lept_get_number(lept_get_array_element(&a, i)));
 
-#if 0
+#if 1
     for (i = 0; i < 2; i++) {
         lept_init(&e);
         lept_set_number(&e, i);
@@ -714,7 +725,8 @@ int main() {
     test_parse();
     test_stringify();
     test_equal();
-    test_copy();
+	test_copy_array();
+	test_copy();
     test_move();
     test_swap();
     test_access();

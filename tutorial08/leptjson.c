@@ -416,16 +416,39 @@ char* lept_stringify(const lept_value* v, size_t* length) {
 }
 
 void lept_copy(lept_value* dst, const lept_value* src) {
-    assert(src != NULL && dst != NULL && src != dst);
+	size_t i;
+	lept_member *srcMember;
+	lept_member *dstMember;
+	assert(src != NULL && dst != NULL && src != dst);
     switch (src->type) {
         case LEPT_STRING:
             lept_set_string(dst, src->u.s.s, src->u.s.len);
             break;
         case LEPT_ARRAY:
-            /* \todo */
+			lept_set_array(dst, src->u.a.size);
+			for (i = 0; i < src->u.a.size; ++i)
+			{
+				dst->u.a.size++;
+				lept_copy(&dst->u.a.e[i], &src->u.a.e[i]);
+			}
             break;
         case LEPT_OBJECT:
-            /* \todo */
+			lept_set_object(dst, src->u.o.size);
+			for (i = 0; i < src->u.o.size; ++i)
+			{
+				dst->u.o.size++;
+				srcMember = &src->u.o.m[i];
+				dstMember = &dst->u.o.m[i];
+
+				/* 这里非常重要，之前因为 lept_set_object 中只是申请了内存和分配了 capacity */
+				/* 并没有实际的初始化内存，所以在后面 copy array 的时候，调用了 lept_free() */
+				/* 而这个时候的 lept_free() 的行为是未定义的 */
+				lept_init(&dstMember->v);
+				dstMember->klen = srcMember->klen;
+				dstMember->k = (char *) malloc(srcMember->klen + 1);
+				memcpy(dstMember->k, srcMember->k, srcMember->klen + 1);
+				lept_copy(&dstMember->v, &srcMember->v);
+			}
             break;
         default:
             lept_free(dst);
@@ -482,6 +505,7 @@ lept_type lept_get_type(const lept_value* v) {
 
 int lept_is_equal(const lept_value* lhs, const lept_value* rhs) {
     size_t i;
+    lept_value *v;
     assert(lhs != NULL && rhs != NULL);
     if (lhs->type != rhs->type)
         return 0;
@@ -499,7 +523,14 @@ int lept_is_equal(const lept_value* lhs, const lept_value* rhs) {
                     return 0;
             return 1;
         case LEPT_OBJECT:
-            /* \todo */
+        	if (lhs->u.o.size != rhs->u.o.size)
+				return 0;
+			for (i = 0; i < lhs->u.o.size; ++i)
+			{
+				v = lept_find_object_value(rhs, lhs->u.o.m[i].k, lhs->u.o.m[i].klen);
+				if (!lept_is_equal(&lhs->u.o.m[i].v, v))
+					return 0;
+			}
             return 1;
         default:
             return 1;
@@ -553,7 +584,13 @@ void lept_set_array(lept_value* v, size_t capacity) {
     v->type = LEPT_ARRAY;
     v->u.a.size = 0;
     v->u.a.capacity = capacity;
-    v->u.a.e = capacity > 0 ? (lept_value*)malloc(capacity * sizeof(lept_value)) : NULL;
+	if (capacity > 0)
+	{
+		lept_value *ptr = (lept_value*)malloc((capacity + 1) * sizeof(lept_value));
+		v->u.a.e =  ptr;
+	}
+	else
+		v->u.a.e = NULL;
 }
 
 size_t lept_get_array_size(const lept_value* v) {
@@ -607,14 +644,41 @@ void lept_popback_array_element(lept_value* v) {
 }
 
 lept_value* lept_insert_array_element(lept_value* v, size_t index) {
+	size_t i;
+	lept_value tmp;
+	lept_init(&tmp);
     assert(v != NULL && v->type == LEPT_ARRAY && index <= v->u.a.size);
-    /* \todo */
-    return NULL;
+	if (v->u.a.size == v->u.a.capacity)
+		lept_reserve_array(v, v->u.a.capacity == 0 ? 1 : v->u.a.capacity * 2);
+	for (i = index; i <= v->u.a.size; ++i)
+	{
+		lept_swap(&tmp, &v->u.a.e[i]);
+	}
+	v->u.a.size++;
+	return &v->u.a.e[index];
 }
 
 void lept_erase_array_element(lept_value* v, size_t index, size_t count) {
+	size_t prev, next, delete_num;
     assert(v != NULL && v->type == LEPT_ARRAY && index + count <= v->u.a.size);
-    /* \todo */
+    /*
+     * 必须执行 lept_free，否则会有内存泄漏
+     * */
+	for (prev = index, delete_num = 0;
+		 prev < v->u.a.size && delete_num < count;
+		 ++prev, ++delete_num)
+	{
+		lept_free(&v->u.a.e[prev]);
+	}
+
+	for (prev = index, next = prev + count;
+		 next < v->u.a.size;
+		 ++prev, ++next)
+	{
+		lept_swap(&v->u.a.e[prev], &v->u.a.e[next]);
+	}
+
+    v->u.a.size -= delete_num;
 }
 
 void lept_set_object(lept_value* v, size_t capacity) {
@@ -679,7 +743,7 @@ size_t lept_find_object_index(const lept_value* v, const char* key, size_t klen)
     return LEPT_KEY_NOT_EXIST;
 }
 
-lept_value* lept_find_object_value(lept_value* v, const char* key, size_t klen) {
+lept_value* lept_find_object_value(const lept_value* v, const char* key, size_t klen) {
     size_t index = lept_find_object_index(v, key, klen);
     return index != LEPT_KEY_NOT_EXIST ? &v->u.o.m[index].v : NULL;
 }
