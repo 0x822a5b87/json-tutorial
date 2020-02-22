@@ -346,8 +346,82 @@ int lept_parse(lept_value* v, const char* json) {
     return ret;
 }
 
+/* 如果 s 过长，可能会导致 lept_context 多次的扩容 */
 static void lept_stringify_string(lept_context* c, const char* s, size_t len) {
-    /* ... */
+    size_t i;
+    char ch;
+    PUTC(c, '"');
+    for (i = 0; i < len; ++i)
+    {
+        ch = s[i];
+        /* 如果是特殊字符就需要编码 */
+        switch (ch)
+        {
+			case '\"': PUTS(c, "\\\"", 2); break;
+			case '\\': PUTS(c, "\\\\", 2); break;
+			/* \ 的转义是可选的，读的时候 \/ 和 / 都是 /，输出的时候直接输出 / 即可 */
+			/*case '/':  PUTS(c, "\\/", 2); break;*/
+			case '\b': PUTS(c, "\\b", 2); break;
+			case '\f': PUTS(c, "\\f", 2); break;
+            case '\n': PUTS(c, "\\n", 2); break;
+			case '\r': PUTS(c, "\\r", 2); break;
+			case '\t': PUTS(c, "\\t", 2); break;
+			default:
+				if (ch < 0x20u) {
+					char buffer[7];
+					sprintf(buffer, "\\u%04X", ch);
+					PUTS(c, buffer, 6);
+				}
+				else if (ch < 0x80u)
+					PUTC(c, ch);
+        }
+    }
+    PUTC(c, '"');
+}
+
+static void lept_stringify_value(lept_context* c, const lept_value* v);
+
+static void lept_stringify_array(lept_context* c, const lept_value *v) {
+	size_t i;
+	assert(v != NULL && v->type == LEPT_ARRAY);
+	PUTC(c, '[');
+	for (i = 0; i < v->u.a.size; ++i)
+	{
+		lept_value va = v->u.a.e[i];
+		lept_stringify_value(c, &va);
+		/* 这种最后一次不需要输出的可以有一个比较简单的优化 */
+		if (i != v->u.a.size - 1)
+		{
+			PUTC(c, ',');
+		}
+	}
+
+	/*
+	for (i = 0; i < v->u.o.size; i++) {
+		if (i > 0)
+			PUTC(c, ',');
+	}
+	 */
+	PUTC(c, ']');
+}
+
+static void lept_stringify_object(lept_context *c, const lept_value *v)
+{
+	size_t i, len;
+	lept_member *p;
+	assert(v != NULL && v->type == LEPT_OBJECT);
+	PUTC(c, '{');
+	len = v->u.o.size;
+	p = v->u.o.m;
+	for (i = 0; i < len; ++i)
+	{
+		lept_stringify_string(c, p[i].k, p[i].klen);
+		PUTC(c, ':');
+		lept_stringify_value(c, &p[i].v);
+		if (i != len - 1)
+			PUTC(c, ',');
+	}
+	PUTC(c, '}');
 }
 
 static void lept_stringify_value(lept_context* c, const lept_value* v) {
@@ -357,13 +431,9 @@ static void lept_stringify_value(lept_context* c, const lept_value* v) {
         case LEPT_TRUE:   PUTS(c, "true",  4); break;
         case LEPT_NUMBER: c->top -= 32 - sprintf(lept_context_push(c, 32), "%.17g", v->u.n); break;
         case LEPT_STRING: lept_stringify_string(c, v->u.s.s, v->u.s.len); break;
-        case LEPT_ARRAY:
-            /* ... */
-            break;
-        case LEPT_OBJECT:
-            /* ... */
-            break;
-        default: assert(0 && "invalid type");
+        case LEPT_ARRAY:  lept_stringify_array(c, v); break;
+        case LEPT_OBJECT: lept_stringify_object(c, v); break;
+        default: assert(0 && "inalid type");
     }
 }
 
